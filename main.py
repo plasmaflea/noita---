@@ -13,14 +13,11 @@ CONFIG_FILE = "config.json"
 ARCHIVE_DIR_NAME = "archives"
 ARCHIVE_README_FILE = "README_这是Noita存档备份目录.txt"
 APP_DESC_TEXT = (
-    "这个程序是我根据B站一个哥们的存档工具来的灵感 (=^▽^=)\n"
-    "然后自己写的一个版本。(=^_^=)\n"
+    "一个简单的 Noita 存档备份小工具 (=^▽^=)\n"
+    "主要给群友用，免得大家老是手动去存档 (=^-^=)\n"
     "\n"
-    "去掉了那哥们的繁琐确认环节，(=^o^=)\n"
-    "调整了按键的数字和顺序，操作更方便了。(=^.^=)\n"
+    "输入数字，然后回车即可 (=^w^=)\n"
     "\n"
-    "主要还是给群友用，免得大家老是手动去存档。(=^-^=)\n"
-    "欢迎大家一起来联机互相van游戏！(=^w^=)\n"
     "联机加群1023638578 (=^▽^=)\n"
     "GitHub项目地址: https://github.com/plasmaflea/noita--- (=^.^=)\n"
     "\n"
@@ -441,10 +438,10 @@ class ArchiveManager:
         print("9.deleteAll(da)  删除全部存档")
         print("10.mArchive(ma)  修改存档信息(名称/备注)")
         print("11.usage(use)    查看占用空间")
-        print("12.about(ab)     程序说明")
-        print("13.clearScreen(cls)      清屏")
-        print("14.quit(q)       退出")
-        print("15.wipe(ws)      清空当前存档(先自动备份，再删除 save00，游戏从头开始)")
+        print("12.wipe(ws)      清空当前存档")
+        print("13.about(ab)     程序说明")
+        print("14.clearScreen(cls)      清屏")
+        print("15.quit(q)       退出")
         print(f"\n程序说明: {app_desc_text()}\n")
         print(f"当前 Noita 存档路径: {self.get_noita_save_path()}\n")
         print(f"当前归档目录路径: {self.archive_root}\n")
@@ -461,11 +458,9 @@ def print_menu() -> None:
     print()
     print("7.delArch(del)   删除指定存档   8.qDelete(qd)   删除最新存档             9.deleteAll(da)  删除全部存档")
     print()
-    print("10.mArchive(ma)  修改存档信息   11.usage(use)   查看占用空间")
+    print("10.mArchive(ma)  修改存档信息   11.usage(use)   查看占用空间             12.wipe(ws)      清空当前存档")
     print()
-    print("15.wipe(ws)      清空当前存档(先自动备份，再删除 save00，游戏从头开始)")
-    print()
-    print("12.about(ab)     程序说明       13.clearScreen(cls) 清屏                 14.quit(q)       退出")
+    print("13.about(ab)     程序说明       14.clearScreen(cls) 清屏                 15.quit(q)       退出")
     print()
 
 
@@ -510,21 +505,21 @@ def main() -> None:
         "11": "usage",
         "usage": "usage",
         "use": "usage",
-        "12": "about",
+        "12": "wipe",
+        "wipe": "wipe",
+        "ws": "wipe",
+        "wipesave": "wipe",
+        "13": "about",
         "about": "about",
         "ab": "about",
         "help": "help",
         "h": "help",
-        "13": "clear",
+        "14": "clear",
         "clearscreen": "clear",
         "cls": "clear",
-        "14": "quit",
+        "15": "quit",
         "quit": "quit",
         "q": "quit",
-        "15": "wipe",
-        "wipe": "wipe",
-        "ws": "wipe",
-        "wipesave": "wipe",
     }
 
     print_menu()
