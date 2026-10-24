@@ -7,7 +7,8 @@ from pathlib import Path
 from typing import Optional
 
 
-APP_TITLE = "noita存档工具-电浆蓝版本"
+APP_VERSION = "4"
+APP_TITLE = f"noita存档工具-电浆蓝版本{APP_VERSION}"
 INDEX_FILE = "archive_index.json"
 CONFIG_FILE = "config.json"
 ARCHIVE_DIR_NAME = "archives"
