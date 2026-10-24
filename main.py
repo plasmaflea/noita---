@@ -86,10 +86,6 @@ class ArchiveManager:
     def _load_config(self) -> dict:
         default_config = {
             "noita_save_path": str(default_noita_save_path()),
-            # 清空当前存档前是否需要输入 y 确认
-            "wipe_confirm": True,
-            # 清空当前存档前是否自动备份一份到归档目录
-            "wipe_auto_backup": True,
         }
         if not self.config_path.exists():
             self._save_json(self.config_path, default_config)
@@ -408,27 +404,6 @@ class ArchiveManager:
             print("[提示] 存档目录已经是空的，下次启动就是全新游戏。")
             return
 
-        print("=" * 72)
-        print("[警告] 此操作会删除 Noita 的当前存档，游戏将从头开始！")
-        print(f"即将清空的目录: {src}")
-        print("=" * 72)
-
-        if self.config.get("wipe_confirm", True):
-            ans = input("确认清空请输入 y（直接回车取消）：").strip().lower()
-            if ans != "y":
-                print("[提示] 已取消，未做任何改动。")
-                return
-
-        backup_rec = None
-        if self.config.get("wipe_auto_backup", True):
-            before = len(self.index)
-            self.save(quick=True, note="清空当前存档前自动备份")
-            if len(self.index) > before:
-                backup_rec = self.index[-1]
-            else:
-                print("[错误] 自动备份未完成，为安全起见已中止清空操作。")
-                return
-
         try:
             shutil.rmtree(src)
             src.mkdir(parents=True, exist_ok=True)
@@ -437,12 +412,7 @@ class ArchiveManager:
             print("请确认 Noita 已完全退出（游戏运行时文件会被占用）。")
             return
 
-        print("[成功] 当前存档已清空，下次启动 Noita 将是无存档的全新游戏。")
-        if backup_rec:
-            print(
-                f"[提示] 已自动备份为 #{backup_rec['id']} {backup_rec['name']}，"
-                "想恢复时用 load 读取它即可。"
-            )
+        print("[成功] 当前存档已清空，下次启动 Noita 就是无存档的全新游戏。")
 
     def usage(self) -> None:
         total_size = 0
