@@ -80,6 +80,8 @@ class ArchiveManager:
                 self.index = recovered
                 self._save_index()
                 print(f"[提示] 已从备份目录恢复 {len(recovered)} 条存档记录。")
+        else:
+            self._sync_index_with_disk()
 
     def _load_config(self) -> dict:
         default_config = {
@@ -148,6 +150,35 @@ class ArchiveManager:
             key=lambda p: p.name,
         )
         return [self._record_from_folder(folder, i) for i, folder in enumerate(folders, start=1)]
+
+    def _sync_index_with_disk(self) -> None:
+        """启动自检：列表与磁盘对账，避免「列表里有、实际没了」或「磁盘有、列表没有」。"""
+        if not self.archive_root.exists():
+            return
+        disk_dirs = sorted(
+            (p for p in self.archive_root.iterdir() if p.is_dir()),
+            key=lambda p: p.name,
+        )
+        disk_names = {p.name for p in disk_dirs}
+        index_names = {rec["folder"] for rec in self.index}
+
+        missing = [rec for rec in self.index if rec["folder"] not in disk_names]
+        if missing:
+            self.index = [rec for rec in self.index if rec["folder"] in disk_names]
+            print(f"[提示] 有 {len(missing)} 条记录的备份文件夹已丢失，已从列表中移除：")
+            for rec in missing:
+                print(f"       #{rec['id']} {rec['name']}  ({rec['folder']})")
+
+        added = [p for p in disk_dirs if p.name not in index_names]
+        if added:
+            next_id = len(self.index) + 1
+            for folder in added:
+                self.index.append(self._record_from_folder(folder, next_id))
+                next_id += 1
+            print(f"[提示] 发现 {len(added)} 个磁盘上存在、列表里却没有的备份，已自动补入。")
+
+        if missing or added:
+            self._reindex()
 
     def _save_json(self, path: Path, data) -> None:
         path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -280,7 +311,8 @@ class ArchiveManager:
         src = self.archive_root / rec["folder"]
         dst = self.get_noita_save_path()
         if not src.exists():
-            print(f"[错误] 存档目录不存在：{src}")
+            print(f"[错误] 这条记录的备份文件夹已经不在了：{src.name}")
+            print("       （备份可能被手动删掉或移动过，用 log 看当前有效的备份）")
             return
         try:
             if dst.exists():
@@ -326,6 +358,8 @@ class ArchiveManager:
         try:
             if folder.exists():
                 shutil.rmtree(folder)
+            else:
+                print("[提示] 备份文件夹已不存在，只删除列表记录。")
             self.index = [x for x in self.index if x["id"] != rec["id"]]
             self._reindex()
             print("[成功] 存档已删除。")
