@@ -6,3 +6,4 @@ dist/
 archives/
 archive_index.json
 config.json
+.workbuddy/

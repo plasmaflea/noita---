@@ -28,6 +28,17 @@ APP_DESC_TEXT = (
 )
 
 
+def app_desc_text() -> str:
+    """程序说明正文，末尾附带本机 Noita 默认存档地址。"""
+    default_root = default_noita_save_path().parent
+    return (
+        APP_DESC_TEXT
+        + "\n"
+        + f"运行中游戏的默认存档地址: {default_root} (=^.^=)\n"
+        + "(实际备份/读取的是该目录下的 save00，可在 config.json 里改) (=^▽^=)"
+    )
+
+
 def default_noita_save_path() -> Path:
     local_low = os.environ.get("LOCALAPPDATA", "")
     # LOCALAPPDATA -> .../AppData/Local, LocalLow is sibling directory
@@ -40,16 +51,24 @@ def now_str() -> str:
 
 
 def now_name() -> str:
-    return datetime.now().strftime("%Y%m%d_%H%M%S")
+    # 含微秒，避免同一秒内多次保存时文件夹名冲突、误覆盖。
+    return datetime.now().strftime("%Y%m%d_%H%M%S_%f")
 
 
 def clear_screen() -> None:
     os.system("cls")
 
 
+def app_base_dir() -> Path:
+    # PyInstaller --onefile 下 __file__ 位于临时目录，关闭后索引会丢失。
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent
+
+
 class ArchiveManager:
     def __init__(self) -> None:
-        self.base_dir = Path(__file__).resolve().parent
+        self.base_dir = app_base_dir()
         self.index_path = self.base_dir / INDEX_FILE
         self.config_path = self.base_dir / CONFIG_FILE
         self.config = self._load_config()
@@ -57,18 +76,32 @@ class ArchiveManager:
         self.archive_root.mkdir(parents=True, exist_ok=True)
         self._ensure_archive_readme()
         self.index = self._load_index()
+        if not self.index:
+            recovered = self._rebuild_index_from_archives()
+            if recovered:
+                self.index = recovered
+                self._save_index()
+                print(f"[提示] 已从备份目录恢复 {len(recovered)} 条存档记录。")
 
     def _load_config(self) -> dict:
         default_config = {
             "noita_save_path": str(default_noita_save_path()),
+            # 清空当前存档前是否需要输入 y 确认
+            "wipe_confirm": True,
+            # 清空当前存档前是否自动备份一份到归档目录
+            "wipe_auto_backup": True,
         }
         if not self.config_path.exists():
             self._save_json(self.config_path, default_config)
             return default_config
         try:
             data = json.loads(self.config_path.read_text(encoding="utf-8"))
-            if "noita_save_path" not in data:
-                data["noita_save_path"] = default_config["noita_save_path"]
+            changed = False
+            for key, value in default_config.items():
+                if key not in data:
+                    data[key] = value
+                    changed = True
+            if changed:
                 self._save_json(self.config_path, data)
             return data
         except (json.JSONDecodeError, OSError):
@@ -89,6 +122,34 @@ class ArchiveManager:
         print("[警告] 索引文件损坏，已重建空索引。")
         self._save_json(self.index_path, [])
         return []
+
+    def _record_from_folder(self, folder: Path, archive_id: int) -> dict:
+        folder_name = folder.name
+        if folder_name.endswith("_quicksave"):
+            tag = folder_name[: -len("_quicksave")]
+            name = f"quicksave_{tag.rstrip('_')}"
+        elif folder_name.endswith("_save"):
+            tag = folder_name[: -len("_save")]
+            name = f"save_{tag.rstrip('_')}"
+        else:
+            name = folder_name
+        created_at = datetime.fromtimestamp(folder.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+        return {
+            "id": archive_id,
+            "name": name,
+            "folder": folder_name,
+            "created_at": created_at,
+            "note": "从磁盘恢复",
+        }
+
+    def _rebuild_index_from_archives(self) -> list:
+        if not self.archive_root.exists():
+            return []
+        folders = sorted(
+            (p for p in self.archive_root.iterdir() if p.is_dir()),
+            key=lambda p: p.name,
+        )
+        return [self._record_from_folder(folder, i) for i, folder in enumerate(folders, start=1)]
 
     def _save_json(self, path: Path, data) -> None:
         path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -138,9 +199,12 @@ class ArchiveManager:
                 raise FileExistsError(f"目标已存在：{dst}")
         shutil.copytree(src, dst)
 
-    def _new_archive_record(self, name: str, note: str = "") -> dict:
+    def _new_archive_record(
+        self, name: str, note: str = "", folder_name: Optional[str] = None
+    ) -> dict:
         archive_id = len(self.index) + 1
-        folder_name = f"{now_name()}_{name}"
+        if folder_name is None:
+            folder_name = f"{now_name()}_{name}"
         return {
             "id": archive_id,
             "name": name,
@@ -154,7 +218,7 @@ class ArchiveManager:
             rec["id"] = i
         self._save_index()
 
-    def save(self, quick: bool = False, overwrite_latest: bool = False) -> None:
+    def save(self, quick: bool = False, overwrite_latest: bool = False, note: str = "") -> None:
         if not self._ensure_source_exists():
             return
         src = self.get_noita_save_path()
@@ -174,11 +238,15 @@ class ArchiveManager:
                 print(f"[错误] 覆盖保存失败：{e}")
             return
 
+        tag = now_name()
         if quick:
-            name = "quicksave"
+            # 普通（快速）保存：每次独立子目录与唯一名称，不覆盖已有备份。
+            name = f"quicksave_{tag}"
+            folder_name = f"{tag}_quicksave"
         else:
-            name = f"save_{now_name()}"
-        rec = self._new_archive_record(name=name)
+            name = f"save_{tag}"
+            folder_name = f"{tag}_save"
+        rec = self._new_archive_record(name=name, folder_name=folder_name, note=note)
         dst = self.archive_root / rec["folder"]
         try:
             self._copy_dir(src, dst, overwrite=False)
@@ -281,6 +349,69 @@ class ArchiveManager:
         except OSError as e:
             print(f"[错误] 删除全部失败：{e}")
 
+    def wipe_current_save(self) -> None:
+        """清空 Noita 当前存档（save00），让游戏回到无存档的全新状态。"""
+        src = self.get_noita_save_path()
+
+        if not src.exists():
+            print("[提示] 存档目录不存在，游戏本来就是全新状态，无需清空。")
+            return
+        if not src.is_dir():
+            print(f"[错误] 存档路径不是目录：{src}")
+            return
+
+        parent_name = src.parent.name
+        if parent_name and parent_name.lower() != "nolla_games_noita":
+            print(
+                f"[警告] 当前配置的路径上级目录是「{parent_name}」，"
+                "看起来不是 Noita 默认存档目录，请确认 config.json 配置无误！"
+            )
+
+        try:
+            has_content = any(src.iterdir())
+        except OSError as e:
+            print(f"[错误] 无法读取存档目录：{e}")
+            return
+        if not has_content:
+            print("[提示] 存档目录已经是空的，下次启动就是全新游戏。")
+            return
+
+        print("=" * 72)
+        print("[警告] 此操作会删除 Noita 的当前存档，游戏将从头开始！")
+        print(f"即将清空的目录: {src}")
+        print("=" * 72)
+
+        if self.config.get("wipe_confirm", True):
+            ans = input("确认清空请输入 y（直接回车取消）：").strip().lower()
+            if ans != "y":
+                print("[提示] 已取消，未做任何改动。")
+                return
+
+        backup_rec = None
+        if self.config.get("wipe_auto_backup", True):
+            before = len(self.index)
+            self.save(quick=True, note="清空当前存档前自动备份")
+            if len(self.index) > before:
+                backup_rec = self.index[-1]
+            else:
+                print("[错误] 自动备份未完成，为安全起见已中止清空操作。")
+                return
+
+        try:
+            shutil.rmtree(src)
+            src.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            print(f"[错误] 清空失败：{e}")
+            print("请确认 Noita 已完全退出（游戏运行时文件会被占用）。")
+            return
+
+        print("[成功] 当前存档已清空，下次启动 Noita 将是无存档的全新游戏。")
+        if backup_rec:
+            print(
+                f"[提示] 已自动备份为 #{backup_rec['id']} {backup_rec['name']}，"
+                "想恢复时用 load 读取它即可。"
+            )
+
     def usage(self) -> None:
         total_size = 0
         count = 0
@@ -313,9 +444,11 @@ class ArchiveManager:
         print("12.about(ab)     程序说明")
         print("13.clearScreen(cls)      清屏")
         print("14.quit(q)       退出")
-        print(f"\n程序说明: {APP_DESC_TEXT}\n")
+        print("15.wipe(ws)      清空当前存档(先自动备份，再删除 save00，游戏从头开始)")
+        print(f"\n程序说明: {app_desc_text()}\n")
         print(f"当前 Noita 存档路径: {self.get_noita_save_path()}\n")
         print(f"当前归档目录路径: {self.archive_root}\n")
+        print(f"索引/配置目录: {self.base_dir}\n")
 
 
 def print_menu() -> None:
@@ -330,12 +463,14 @@ def print_menu() -> None:
     print()
     print("10.mArchive(ma)  修改存档信息   11.usage(use)   查看占用空间")
     print()
+    print("15.wipe(ws)      清空当前存档(先自动备份，再删除 save00，游戏从头开始)")
+    print()
     print("12.about(ab)     程序说明       13.clearScreen(cls) 清屏                 14.quit(q)       退出")
     print()
 
 
 def print_about() -> None:
-    print(APP_DESC_TEXT)
+    print(app_desc_text())
     print()
 
 
@@ -386,6 +521,10 @@ def main() -> None:
         "14": "quit",
         "quit": "quit",
         "q": "quit",
+        "15": "wipe",
+        "wipe": "wipe",
+        "ws": "wipe",
+        "wipesave": "wipe",
     }
 
     print_menu()
@@ -426,6 +565,8 @@ def main() -> None:
             manager.delete_archive(quick=True)
         elif cmd == "deleteall":
             manager.delete_all_archives()
+        elif cmd == "wipe":
+            manager.wipe_current_save()
         elif cmd == "usage":
             manager.usage()
         print()
